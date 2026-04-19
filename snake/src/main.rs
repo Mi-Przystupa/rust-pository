@@ -2,11 +2,12 @@ use rand::prelude::*;
 
 use std::io::{self, Write, Stdout};
 use std::vec::{Vec};
+use std::{thread, time};
 use crossterm::event::KeyModifiers;
 use crossterm::{
     ExecutableCommand, QueueableCommand, 
     terminal, cursor, style::{self, Stylize},
-    event::{read, KeyCode},
+    event::{read, KeyCode, poll},
     terminal::{disable_raw_mode, enable_raw_mode}
 };
 
@@ -14,9 +15,9 @@ const WIDTH: usize = 50;
 const HEIGHT: usize = 25;
 
 #[derive(Debug)]
-struct Snake<'a> {
-    body: &'a[(usize, usize, bool)],
-    length: usize
+struct Snake {
+    head: (usize, usize),
+    body: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,40 +103,53 @@ fn create_grid(width: usize, height: usize) -> Vec<Vec<World>>{
 
 
 fn execute_program(sio: &mut Stdout) -> io::Result<()> {
-    let mut i: usize = 10;
-    let mut j: usize = 10;
+    //let mut i: usize = 10;
+    //let mut j: usize = 10;
 
     let mut grid = create_grid(WIDTH, HEIGHT);
     let mut rng = rand::rng();
 
     let mut step: usize = 0;
-    while let Ok(event) = read() {
-        let Some(event) = event.as_key_press_event() else {
-            continue;
-        };
+    let mut code: KeyCode  = KeyCode::Backspace;
+    let mut modifier: String = String::new();
+    let mut snake: Snake = Snake {
+            head: (10, 10),
+            body: vec![]
+    };
 
-        let modifier = match event.modifiers {
-            KeyModifiers::NONE => "".to_string(),
-            _ => format!("{:}+", event.modifiers),
-        };
+    let pause = time::Duration::from_millis(500);
+    loop {
+        
+       if poll(pause)? {
+            let Ok(event) = read() else { 
+                panic!("Cannot read any more!")
+            };
 
+            if let Some(event) = event.as_key_press_event() {
+                code = event.code;
+                modifier = match event.modifiers {
+                    KeyModifiers::NONE => "".to_string(),
+                    _ => format!("{:}+", event.modifiers),
+                };
+
+            }         
+        }
+        
         sio.execute(terminal::Clear(terminal::ClearType::All))?;
-        let i_old = i;
-        let j_old = j;
-        i = update_psn(i, event.code, KeyCode::Right, KeyCode::Left);
+        let (i_old, j_old) = snake.head;
+        snake.head.0 = update_psn(snake.head.0, code, KeyCode::Right, KeyCode::Left);
         let boundary= 1;
-        i = stay_in_boundary(i, boundary, WIDTH - boundary ); 
-        j = update_psn(j, event.code, KeyCode::Down, KeyCode::Up);
-        j = stay_in_boundary(j, boundary, HEIGHT - boundary);
+        
+        snake.head.0 = stay_in_boundary(snake.head.0, boundary, WIDTH - boundary ); 
+
+        snake.head.1 = update_psn(snake.head.1, code, KeyCode::Down, KeyCode::Up);
+        snake.head.1 = stay_in_boundary(snake.head.1, boundary, HEIGHT - boundary);
         
         let i_old = stay_in_boundary(i_old, boundary, WIDTH - boundary ); 
         let j_old = stay_in_boundary(j_old, boundary, HEIGHT - boundary ); 
 
-        if grid[j][i] == World::Fruit {
-
-        }
         grid[j_old][i_old] = World::Empty;
-        grid[j][i] = World::Player;
+        grid[snake.head.1][snake.head.0] = World::Player;
 
 
         step = step + 1;
@@ -148,9 +162,7 @@ fn execute_program(sio: &mut Stdout) -> io::Result<()> {
 
 
         draw_world(sio, &grid);
-        println!("Key pressed: {modifier}{code}\r", code = event.code);
-        println!("i value: {i}", i = i);
-        if event.code == KeyCode::Esc {
+        if code == KeyCode::Esc {
             break;
         }
         
