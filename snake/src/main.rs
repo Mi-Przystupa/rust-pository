@@ -15,29 +15,49 @@ const WIDTH: usize = 50;
 const HEIGHT: usize = 25;
 const BOUNDARY: usize = 1;
 
+#[derive(Debug, Clone, Copy)]
+struct Body {
+    curr: (usize, usize),
+    prev: (usize, usize),
+}
+
 #[derive(Debug)]
 struct Snake {
     head: (usize, usize),
-    body: Vec<(usize, usize)>,
+    //body: Vec<(usize, usize)>,
+    body: Vec<Body>,
     tail: (usize, usize),
 }
 
 impl Snake {
-    fn move_body(&mut self) -> (usize, usize) {
-        let mut new_positions:  Vec::<(usize, usize)> = Vec::new();
-        new_positions.push(self.head);
+    fn move_body(&mut self, new_position: (usize, usize) ) -> (usize, usize) {
+        let mut new_positions:  Vec::<Body> = Vec::new();
 
+        //set new body position
+        new_positions.push(Body{
+               curr: new_position,
+               prev: (self.body[0].curr.0, self.body[0].curr.1) // need to update
+        });
         let l: usize = self.body.len();
-        let ret: (usize, usize) =self.body[l];
-        self.body.truncate(l);
-
+        let end: Body  = self.body[l - 1];
+        self.body.truncate(l - 1);
+        let mut i: usize = 0;
+        //from top of the head, new_positions is where head was
         for old_position in self.body.iter() {
-            let to_push: (usize, usize) = (old_position.0, old_position.1);
+            let to_push: Body = Body{
+                curr: (new_positions[i].prev.0, new_positions[i].prev.1), 
+                prev: (old_position.curr.0, old_position.curr.1),
+            };
             new_positions.push(to_push);
+            i = i + 1;
+            if i >= l - 1 {
+                break
+            }
         }
         self.body = new_positions;
-
-        return ret
+        //need to update prev of current tail to new tail
+        self.body[l -1].prev = (end.curr.0, end.curr.1);
+        return (end.curr.0, end.curr.1)
 
     }
     fn update_head(&mut self, code: KeyCode) -> (usize, usize) {
@@ -58,7 +78,7 @@ impl Snake {
     fn update_position(&mut self, code: KeyCode) -> (usize, usize) {
         let l: usize = self.body.len();
         if l > 0 {
-            self.tail = self.move_body();    
+            self.tail = self.move_body((self.head.0, self.head.1));    
         } else {
             self.tail.0 = self.head.0;
             self.tail.1 = self.head.1;
@@ -69,25 +89,29 @@ impl Snake {
     }
 
     fn grow_body(&mut self) {
-
-       let mut to_add: Vec<(usize, usize)> = vec![self.tail];
+       let mut to_add: Vec<Body> = vec![Body{curr: self.tail, prev: (0, 0)}];
+       let last = self.body.len() ;
+       if last >= 1 {
+           self.body[last - 1].prev = self.tail; // update prev of current tail to new tail
+       }
        self.body.append(&mut to_add);
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum World {
     Player, // Red
     Fruit, // Blue
     Wall, // Magenta
     Empty, //clear
+    Body, //body part
 }
 
 enum Color {
     Red,
     Blue,
     Magenta,
-    //Green
+    Green
 }
 
 fn write_coord(sio: &mut Stdout, x: usize, y: usize, color : Color) {
@@ -103,7 +127,11 @@ fn write_coord(sio: &mut Stdout, x: usize, y: usize, color : Color) {
         Color::Blue => {sio 
           .queue(cursor::MoveTo(x.try_into().unwrap(),y.try_into().unwrap())).expect("")
           .queue(style::PrintStyledContent( "i".blue())).expect("");
+        }, Color::Green => {sio 
+          .queue(cursor::MoveTo(x.try_into().unwrap(),y.try_into().unwrap())).expect("")
+          .queue(style::PrintStyledContent( "i".green())).expect("");
         },
+
     }
 }
     
@@ -114,6 +142,7 @@ fn draw_world(sio: &mut Stdout, grid: &Vec<Vec<World>>) {
             World::Wall => write_coord(sio, x, y, Color::Magenta),   
             World::Player =>  write_coord(sio, x, y, Color::Red),   
             World::Fruit => write_coord(sio, x, y, Color::Blue),
+            World::Body => write_coord(sio, x, y, Color::Green),
             _ => (),
         }
     }
@@ -192,22 +221,23 @@ fn execute_program(sio: &mut Stdout) -> io::Result<()> {
         }
         
         sio.execute(terminal::Clear(terminal::ClearType::All))?;
-        /*
-        let (i_old, j_old) = snake.head;
-        snake.head.0 = update_psn(snake.head.0, code, KeyCode::Right, KeyCode::Left);
-        let boundary= 1;
-        
-        snake.head.0 = stay_in_boundary(snake.head.0, boundary, WIDTH - boundary ); 
-
-        snake.head.1 = update_psn(snake.head.1, code, KeyCode::Down, KeyCode::Up);
-        snake.head.1 = stay_in_boundary(snake.head.1, boundary, HEIGHT - boundary);
-        
-        let i_old = stay_in_boundary(i_old, boundary, WIDTH - boundary ); 
-        let j_old = stay_in_boundary(j_old, boundary, HEIGHT - boundary ); 
-        */
-        let (i_old, j_old) = snake.update_position(code);
-        grid[j_old][i_old] = World::Empty;
+        let (i_old, j_old): (usize, usize) = snake.update_position(code);
+        //get next square value before moving player
+        let new_square: World = grid[snake.head.1][snake.head.0];
         grid[snake.head.1][snake.head.0] = World::Player;
+        //clear old player position
+        grid[j_old][i_old] = World::Empty;
+        
+        if new_square == World::Fruit {
+            snake.grow_body();            
+        }
+
+        for b in &snake.body {
+            grid[b.curr.1][b.curr.0] = World::Body;
+            grid[b.prev.1][b.prev.0] = World::Empty;
+        }
+        
+        
 
 
         step = step + 1;
